@@ -1,0 +1,160 @@
+---
+title: "SAT_scores_by_state"
+author: "Ethan McBride"
+date: today
+output: html_document
+---
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+# Read the SAT scores data
+sat_raw <- read_xlsx("tabn226.40.xlsx",
+                        sheet = "Digest 2023 Table 226.40",
+                        skip = 5, col_names = F)
+```
+
+```{r}
+# Clean the data
+names(sat_raw)[1] <- "State"
+
+sat_clean <- sat_raw |>
+  filter(!is.na(State), State != '')
+
+sat_clean <- sat_clean |>
+  select(where(~!all(is.na(.))))
+
+names(sat_clean)[1:29] <- c( "State",
+  "Total_2018", "TotalSD_2018", "ERW_2018", "ERWSD_2018", "Math_2018", "MathSD_2018", "PctTaking_2018",
+  "Total_2021", "TotalSD_2021", "ERW_2021", "ERWSD_2021", "Math_2021", "MathSD_2021", "PctTaking_2021",
+  "Total_2022", "TotalSD_2022", "ERW_2022", "ERWSD_2022", "Math_2022", "MathSD_2022", "PctTaking_2022",
+  "Total_2023", "TotalSD_2023", "ERW_2023", "ERWSD_2023", "Math_2023", "MathSD_2023", "PctTaking_2023"
+)
+
+sat_clean <- sat_clean[-1, ] # Remove the first row
+sat_clean <- sat_clean[-(53:56), ] # Remove the last rows
+``` 
+
+```{r}
+# Pivot longer for easier analysis
+sat_long <- sat_clean |>
+  pivot_longer(
+    cols = -State,
+    names_to = c("Section", "Year"),
+    names_sep = "_",
+    values_to = "Score"
+  ) |>
+  mutate(Year = as.integer(Year)
+)
+```
+
+
+```{r}
+# Filter for 2023 data and perform ANOVA
+sat_2023 <- sat_long |>
+  filter(Year == 2023) |>
+  filter(State != "United States")
+
+sat_2023_total <- sat_2023 |>
+  filter(Section == "Total")
+
+anova <- aov(Score ~ State, data = sat_2023_total)
+summary(anova)
+```
+
+```{r dotplot, fig.width=10, fig.height=6}
+# Create a boxplot for SAT scores by section
+sat_2023_total |>
+  ggplot(aes(x = reorder(State, Score), y = Score)) +
+  geom_point(size = 2) +
+  geom_text(aes(label = round(Score)), hjust = -0.3, size = 3) +
+  coord_flip() +
+  labs(
+    title = "Average SAT Score by State (2023)",
+    x = "",
+    y = "SAT Score",
+    caption = "Data from the US Department of Education"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    plot.caption = element_text(hjust = 1, size = 8),
+    panel.grid.major.y = element_blank(),
+    axis.ticks = element_blank()
+  ) +
+  expand_limits(y = max(sat_2023_total$Score) + 30) +
+  geom_col(aes(fill = Score)) +
+  scale_fill_gradient(low = "skyblue", high = "darkblue")
+```
+
+```{r facet_wrap, fig.width=10, fig.height=6}
+# Facet wrap by state, year, and section
+sat_long_total <- sat_long |>
+  filter(State != "United States" & Section == "Total")
+
+sat_long_total |>
+  ggplot(aes(x = Year, y = Score, group = State)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "black", size = 1.5) +
+  facet_wrap(~ State, scales = "free_y") +
+  labs(
+    title = "SAT Total Score Trends by State",
+    subtitle = "2018–2023",
+    x = "Year",
+    y = "SAT Total Score"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r line_plot, fig.width=10, fig.height=6}
+# Overlapping the lines to highlight discrepancies
+library(ggrepel)
+highlighted_states <- c("Minnesota",
+                        "Arizona",
+                        "West Virginia",
+                        "Maryland",
+                        "Massachusetts",
+                        "Florida")
+
+label_data <- sat_long_total |>
+  filter(State %in% highlighted_states) |>
+  group_by(State) |>
+  filter(Year == max(Year))
+
+sat_long_total |>
+  mutate(highlight = State %in% highlighted_states) |>
+  ggplot(aes(x = Year, y = Score, group = State)) +
+  geom_line(aes(color = highlight, linewidth = highlight), alpha = 0.7) +
+  scale_color_manual(values = c("gray", "steelblue")) +
+  scale_linewidth_manual(values = c(0.5, 1.5)) +
+  geom_text_repel(data = label_data,
+                  aes(x = Year, y = Score, label = State),
+                  size = 3.5,
+                  nudge_x = 0.5,
+                  segment.color = "grey50",
+                  direction = "y",
+                  hjust = 0,
+                  inherit.aes = FALSE) +
+  labs(
+    title = "SAT Total Score Trends by State and Year",
+    subtitle = "Highlighting states across the nation \nData from US ED",
+    x = "Year",
+    y = "SAT Total Score"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+
+
