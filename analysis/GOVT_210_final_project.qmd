@@ -1,8 +1,8 @@
 ---
-title: "SAT_scores_by_state"
+title: "GOVT 210 final paper data analysis"
 author: "Ethan McBride"
 date: today
-output: html_document
+output: html
 ---
 
 ```{r}
@@ -13,7 +13,7 @@ library(readxl)
 
 ```{r}
 # Read the SAT scores data
-sat_raw <- read_xlsx("tabn226.40.xlsx",
+sat_raw <- read_xlsx("../data_raw/tabn226.40.xlsx",
                         sheet = "Digest 2023 Table 226.40",
                         skip = 5, col_names = F)
 ```
@@ -93,7 +93,7 @@ sat_2023_total |>
   scale_fill_gradient(low = "skyblue", high = "darkblue")
 ```
 
-```{r facet_wrap, fig.width=10, fig.height=6}
+```{r facet_wrap, fig_width=10, fig_height=6}
 # Facet wrap by state, year, and section
 sat_long_total <- sat_long |>
   filter(State != "United States" & Section == "Total")
@@ -117,7 +117,7 @@ sat_long_total |>
   )
 ```
 
-```{r line_plot, fig.width=10, fig.height=6}
+```{r line_plot, fig_width=10, fig_height=6}
 # Overlapping the lines to highlight discrepancies
 library(ggrepel)
 highlighted_states <- c("Minnesota",
@@ -154,6 +154,139 @@ sat_long_total |>
   ) +
   theme_minimal() +
   theme(legend.position = "none")
+```
+
+
+```{r}
+# Read data from ED on grants by state
+grants_raw <- read_xlsx("../data_raw/25stbystate.xlsx",
+                        sheet = "FY 2023-2025 State by State",
+                        skip = 65, col_names = F)
+
+# Clean the data
+names(grants_raw)[1] <- "state_or_grant"
+
+grants_clean <- grants_raw |>
+  mutate(
+    is_state = if_all(`...2`:`...6`, ~ . == "No Data"),
+    state = if_else(is_state, state_or_grant, NA_character_)
+  ) |>
+  fill(state) |>
+  select(-is_state) |>
+  relocate(state, .before = state_or_grant)
+
+target_programs <- c("Grants to Local Educational Agencies",
+                     "Subtotal, All Elementary/Secondary Level Programs")
+
+names(grants_clean) <- c("state", "program", "2023", "2024", "2025", "amt_change", "pct_change")
+
+grants_clean_filtered <- grants_clean |>
+  filter(program %in% target_programs) |>
+  select(-c(amt_change, pct_change))
+
+grants_clean_long <- grants_clean_filtered |>
+  pivot_longer(
+    cols = c(`2023`, `2024`, `2025`),
+    names_to = "year",
+    values_to = "amount"
+  ) |>
+  mutate(amount = as.numeric(amount))
+  
+```
+
+
+```{r}
+# Merge data sets
+grants_clean_2023 <- grants_clean_long |>
+  filter(year == "2023")
+
+grants_clean_2023 |>
+  filter(program == "Subtotal, All Elementary/Secondary Level Programs") |>
+  summarize(
+    total = sum(amount, na.rm = TRUE)
+  )
+
+merged_data <- sat_2023_total |>
+  merge(grants_clean_2023,
+        by.x = "State",
+        by.y = "state",
+        all.x = TRUE
+  )
+
+merged_data <- merged_data |>
+  select(-c(Section, Year))
+```
+
+```{r}
+# Summary statistics for merged data
+summary(merged_data)
+
+elementary_secondary_grants <- grants_clean_2023 |>
+  filter(program == "Subtotal, All Elementary/Secondary Level Programs") 
+
+elementary_secondary_grants |>
+  summarize(
+    total_amount = sum(amount, na.rm = TRUE),
+    avg_amount = mean(amount, na.rm = TRUE),
+    min_amount = min(amount, na.rm = TRUE),
+    max_amount = max(amount, na.rm = TRUE)
+  )
+```
+
+
+```{r}
+# Boxplot
+library(scales)
+
+p95 <- quantile(elementary_secondary_grants$amount, 0.95, na.rm = TRUE)
+
+elementary_secondary_grants |>
+  ggplot(aes(y = amount)) +
+  # coord_cartesian(ylim = c(0, p95)) +
+  scale_y_continuous(
+    labels = dollar_format(scale = 1e-9)
+  ) +
+  geom_boxplot(fill = "skyblue") +
+  labs(
+    title = "Grants to Elementary & Secondary Education by State (2023)",
+    subtitle = "Boxplot of Grant Amounts \nExcluding unique upper outlier",
+    y = "Grant amount (in billions $)"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+ggplot(merged_data, aes(x = amount, y = Score)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(
+    title = "SAT Scores vs. Grant Amounts by State (2023)",
+    x = "Grant Amount",
+    y = "SAT Score"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10)
+  )
+```
+
+
+```{r}
+# Correlation analysis
+correlation <- cor(merged_data$amount, merged_data$Score, use = "complete.obs")
+correlation
+```
+
+
+```{r}
+# Linear regression analysis
+lm_model <- lm(Score ~ amount, data = merged_data)
+summary(lm_model) 
+## Highlights how federal funding is currently being given to states suffering in standardized testing
 ```
 
 
